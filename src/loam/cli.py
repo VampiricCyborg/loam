@@ -190,7 +190,7 @@ def bench(
     make_plot: Annotated[bool, typer.Option("--plot", help="Write a recall-vs-QPS plot")] = False,
     data_dir: Annotated[Path, typer.Option(help="Where HDF5 files live")] = Path("data"),
 ) -> None:
-    """Sweep ``ef`` and report recall against the exact oracle."""
+    """Sweep ef and report recall against the exact oracle."""
     ef_values = _parse_ef(ef)
     ds = _load(dataset, n, queries, k, dim, clusters, spread, seed, data_dir)
 
@@ -236,12 +236,14 @@ def bench(
     console.print(f"[dim]build: {build_seconds:.1f}s  |  {machine_description()}[/dim]")
 
     if out:
-        result.rows.extend(extra)
-        path = result.write_csv(out)
-        console.print(f"[green]wrote[/green] {path}")
+        # Plot before the reference rows are folded in: they belong on the
+        # chart as separate marks, not as points on the HNSW curve.
         if make_plot:
             plot_path = plot(result, Path(out).with_suffix(".png"), extra=extra)
             console.print(f"[green]wrote[/green] {plot_path}")
+        result.rows.extend(extra)
+        path = result.write_csv(out)
+        console.print(f"[green]wrote[/green] {path}")
     elif make_plot:
         console.print("[yellow]--plot needs --out to know where to write[/yellow]")
 

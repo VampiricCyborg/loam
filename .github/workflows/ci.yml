@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: pytest (Python ${{ matrix.python-version }} on ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install the project
+        run: uv sync --extra dev --python ${{ matrix.python-version }}
+
+      - name: Run the test suite
+        run: uv run pytest -q
+
+      # A end-to-end run on generated data. No network, no HDF5 download: this
+      # checks that the CLI, the bench harness and the plot writer all still
+      # work together, which unit tests alone would not catch.
+      - name: Smoke-test the CLI
+        run: |
+          uv run loam version
+          uv run loam bench random --n 800 --queries 100 --ef 16,64 --dim 16 --out bench/results/ci.csv --plot
+          uv run loam trace random --n 500 --dim 16 --ef 16

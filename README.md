@@ -285,7 +285,6 @@ Loam/
 │   ├── test_recall.py       # recall floors on small fixed-seed datasets
 │   └── test_determinism.py  # same seed → identical graph
 ├── bench/results/           # generated CSVs and plots (committed for the README)
-├── docs/assets/             # demo GIF, diagrams
 ├── .github/workflows/ci.yml
 ├── pyproject.toml
 ├── CONTRIBUTING.md
@@ -301,7 +300,7 @@ Loam/
 
 - Python **3.12 or newer** (numpy 2.x requires ≥ 3.12)
 - [uv](https://docs.astral.sh/uv/) (recommended) or pip
-- ~150 MB of free disk space for the default dataset (`glove-25-angular`)
+- ~130 MB of free disk space for the default dataset (`glove-25-angular`)
 - *Optional:* a C++ compiler, needed only for the hnswlib reference comparison
 
 ### Installation
@@ -336,7 +335,7 @@ uv run loam --help
 ### Fetch a dataset
 
 ```bash
-# GloVe-25 angular from ANN-Benchmarks (~121 MB, HDF5)
+# GloVe-25 angular from ANN-Benchmarks (127 MB, HDF5)
 uv run loam fetch glove-25-angular
 ```
 
@@ -375,10 +374,10 @@ print(f"recall@10 = {recall:.2f}")
 
 ```bash
 uv run loam bench glove-25-angular \
-  --n 20000 --queries 1000 --k 10 \
-  --M 16 --ef-construction 200 \
+  --n 10000 --queries 1000 --k 10 \
+  -M 16 --ef-construction 200 \
   --ef 16,32,64,128,256 \
-  --out bench/results/glove25.csv --plot
+  --out bench/results/glove25-ef-sweep.csv --plot
 ```
 
 ### Ablations
@@ -388,7 +387,7 @@ uv run loam bench glove-25-angular \
 uv run loam ablate selection --dataset clustered --clusters 100 --dim 10 --n 20000
 
 # Hierarchy on vs off (flat NSW): tests the "Hub Highway" claim
-uv run loam ablate hierarchy --dataset glove-25-angular --n 20000
+uv run loam ablate hierarchy --dataset glove-25-angular --n 10000
 ```
 
 ### Trace a single query
@@ -397,44 +396,161 @@ uv run loam ablate hierarchy --dataset glove-25-angular --n 20000
 uv run loam trace glove-25-angular --n 5000 --query-index 0 --ef 32
 ```
 
-Prints the entry point, each greedy hop on the upper layers, and the beam expansion on layer 0.
+Prints the entry point, each greedy hop on the upper layers, and the beam expansion on layer 0. Actual output, abridged only where the run itself prints `... N further expansions omitted`:
+
+```text
+building HNSW: 11.0s  (2.20 ms/insert)  layer sizes [5000, 283, 18, 2]
+
+Query trace  k=10  ef=32  entry point=node 3517 on layer 3
+
+layer 3  (greedy descent, ef=1, 2 node(s) expanded)
+  enter at: node 3517 @ 1.0063
+   #   expanded    distance   new neighbors
+   1       3517     1.00629               1  closer
+   2       4350     0.99973               0  closer
+  -> hands node 4350 down at distance 0.99973
+
+layer 2  (greedy descent, ef=1, 2 node(s) expanded)
+  enter at: node 4350 @ 0.9997
+   #   expanded    distance   new neighbors
+   1       4350     0.99973              16  closer
+   2       2516     0.47033               1  closer
+  -> hands node 2516 down at distance 0.47033
+
+layer 1  (greedy descent, ef=1, 2 node(s) expanded)
+  enter at: node 2516 @ 0.4703
+   #   expanded    distance   new neighbors
+   1       2516     0.47033              16  closer
+   2       4874     0.21436              11  closer
+  -> hands node 4874 down at distance 0.21436
+
+layer 0  (beam search, ef=32, 32 node(s) expanded)
+  enter at: node 4874 @ 0.2144
+   #   expanded    distance   new neighbors
+   1       4874     0.21436              16  closer
+   2       4833     0.20585              15  closer
+   3       2412     0.16873              24  closer
+   4        592     0.19179              21  --
+   5       3620     0.19887              15  --
+   6         64     0.20688              20  --
+   ... 20 further expansions omitted
+  -> best in beam: node 2412 at 0.16873
+
+Result
+ rank      node    distance  in exact top-k?
+    1      2412     0.16873  yes
+    2      1280     0.18833  yes
+    3      3160     0.18894  yes
+   ...
+   10      4874     0.21436  yes
+
+recall@10 for this query: 1.00
+work: 466 distance computations, 466 nodes visited, hops per layer: L3:2  L2:2  L1:2  L0:32
+```
+
+The two phases of Algorithm 5 have visibly different shapes. The descent spends **two hops per layer** and cuts the distance from 1.006 to 0.214 — most of the progress, for almost none of the work. Layer 0 then spends **32 expansions**, and finds its eventual best answer on the *third* of them. The other 29 are the price of confirming that nothing better exists, and that is what a larger `ef` actually buys: not a better answer found sooner, but more confidence that the answer already found is right.
 
 ### Compare against hnswlib (optional)
 
 ```bash
-uv run loam bench glove-25-angular --n 20000 --ef 16,32,64,128 --reference hnswlib
+uv run loam bench glove-25-angular --n 10000 --ef 16,32,64,128 --reference hnswlib
 ```
 
 ---
 
 ## Benchmarks
 
-> Every cell below is filled from `loam bench` / `loam ablate` output on a clean checkout. The command and machine are listed with each table. **Until they are measured, these cells stay empty.**
+> Every cell below is pasted from the stdout of the command printed above it, run on a clean checkout.
 
-**ef sweep: glove-25-angular, n = _TBD_, k = 10, M = 16, ef_construction = 200**
-Command: `_TBD_` · Machine: `_TBD_`
+**Machine for every table on this page:** `Windows 11, Intel64 Family 6 Model 154 Stepping 3, GenuineIntel, Python 3.13.1` (numpy 2.5.3, single-threaded). That string is what `loam version` prints, and every command echoes it.
 
-| ef | recall@10 | QPS (1 thread) | mean distance comps / query |
-|---:|---:|---:|---:|
-| 16 | — | — | — |
-| 32 | — | — | — |
-| 64 | — | — | — |
-| 128 | — | — | — |
-| 256 | — | — | — |
-| flat (exact) | 1.000 | — | n |
+### ef sweep: glove-25-angular
 
-**Ablations**
+```bash
+uv run loam bench glove-25-angular --n 10000 --queries 1000 --k 10 \
+  -M 16 --ef-construction 200 --ef 16,32,64,128,256 \
+  --out bench/results/glove25-ef-sweep.csv --plot
+```
 
-| Experiment | Variant A | Variant B | Result |
-|---|---|---|---|
-| Neighbor selection (clustered, d=10) | simple | heuristic | — |
-| Hierarchy (glove-25) | HNSW | flat NSW (`--no-hierarchy`) | — |
+Build: **44.6 s** (4.46 ms/insert). Layer sizes `[10000, 571, 35, 5]` — each layer holds roughly `1/M` of the one below it, as `mL = 1/ln(M)` intends.
 
-**Methodology notes**
+| ef | recall@10 | QPS (1 thread) | mean distance comps / query | mean hops | latency (ms) |
+|---:|---:|---:|---:|---:|---:|
+| 16 | 0.9360 | 3315.1 | 397.2 | 23.5 | 0.302 |
+| 32 | 0.9814 | 1724.9 | 618.4 | 38.9 | 0.580 |
+| 64 | 0.9970 | 993.0 | 1001.6 | 70.5 | 1.007 |
+| 128 | 0.9997 | 622.4 | 1623.3 | 134.3 | 1.607 |
+| 256 | 1.0000 | 285.1 | 2595.1 | 262.2 | 3.507 |
+| flat (exact) | 1.0000 | 6348.7 | 10000.0 | — | 0.158 |
 
-- QPS is single-threaded wall-clock over all queries, after a warm-up pass.
-- Recall is the mean of `|approx ∩ exact| / k` over all queries.
-- Pure-Python build time is much slower than C++ libraries. The default `--n` is set so a full `bench` run finishes in minutes on a laptop, and it is calibrated on day one.
+![recall vs QPS on glove-25-angular](bench/results/glove25-ef-sweep.png)
+
+**Read this table honestly: at n = 10,000 the exact index is the faster one.**
+
+That is not a bug, and it is the most useful thing in this repo. The algorithmic win is real and large — at `ef=16`, HNSW answers with **397 distance computations instead of 10,000**, a 25× reduction, and still gets 93.6% of the true top-10. But Loam loses on wall clock anyway, because the two indexes pay very different prices per distance:
+
+- `FlatIndex` computes all 10,000 distances in **one** numpy call: a single BLAS matmul over one contiguous `(10000, 25)` matrix.
+- `HNSWIndex` computes its 397 distances across **23.5 separate** gather-plus-matmul calls, one per expanded node, each carrying Python interpreter overhead that dwarfs its arithmetic.
+
+So a 25× reduction in *work* becomes a 20× increase in *time*. The crossover where HNSW wins on the clock needs either a much larger `n` (where the flat matmul stops being cheap) or an implementation where each distance costs the same — which is exactly what hnswlib's C++ buys, and exactly why Loam does not try to compete with it. Loam's job is to show you the 397, and it does.
+
+### Ablation 1: neighbor selection, Algorithm 3 vs Algorithm 4
+
+```bash
+uv run loam ablate selection --dataset clustered --clusters 100 --dim 10 \
+  --n 20000 --queries 1000 --ef 16,32,64,128 \
+  --out bench/results/ablate-selection.csv
+```
+
+Build: simple **19.7 s**, heuristic **41.5 s**. Same data, same seed, same `M` and `ef_construction`; the only difference is which SELECT-NEIGHBORS runs.
+
+| ef | simple recall@10 | heuristic recall@10 | difference | simple QPS | heuristic QPS |
+|---:|---:|---:|---:|---:|---:|
+| 16 | 0.8989 | **1.0000** | +0.1011 | 4664.2 | 3735.4 |
+| 32 | 0.9110 | **1.0000** | +0.0890 | 3334.5 | 2609.3 |
+| 64 | 0.9303 | **1.0000** | +0.0697 | 2105.2 | 1642.6 |
+| 128 | 0.9545 | **1.0000** | +0.0455 | 1544.3 | 1012.3 |
+
+**The paper's Fig. 7 claim reproduces.** On 100 tight clusters in 10 dimensions, nearest-M selection tops out at 0.9545 even at `ef=128`, while the diversity heuristic is exact at every `ef` tested. The shape matters as much as the gap: simple selection does not merely start lower, it *converges slowly*, because widening the beam cannot help a search that has no edge out of the cluster it landed in. Diverse links create those edges; extra beam width only searches harder within the same trap.
+
+The cost is real and visible: the heuristic build takes 2.1× as long, and its graphs are slower to query (it fills the degree budget, so each hop scores more neighbors). On clustered data that is an obvious trade to make.
+
+### Ablation 2: is the "H" in HNSW doing anything?
+
+```bash
+uv run loam ablate hierarchy --dataset glove-25-angular --n 10000 \
+  --queries 1000 --ef 16,32,64,128,256 \
+  --out bench/results/ablate-hierarchy.csv
+```
+
+Build: HNSW **45.9 s**, flat NSW **23.4 s**.
+
+| ef | HNSW recall@10 | flat NSW recall@10 | difference | HNSW QPS | flat NSW QPS |
+|---:|---:|---:|---:|---:|---:|
+| 16 | 0.9360 | 0.9337 | −0.0023 | 3242.7 | 3622.3 |
+| 32 | 0.9814 | 0.9816 | +0.0002 | 2087.4 | 2226.8 |
+| 64 | 0.9970 | 0.9969 | −0.0001 | 1202.6 | 1279.0 |
+| 128 | 0.9997 | 0.9997 | +0.0000 | 649.1 | 676.8 |
+| 256 | 1.0000 | 1.0000 | +0.0000 | 362.6 | 366.3 |
+
+**Down with the Hierarchy (arXiv:2412.01940) reproduces here too.** Deleting every layer above 0 costs at most 0.0023 recall, and the flat graph is *slightly faster at every `ef`* while building in half the time. At this scale and dimension the layers earn nothing.
+
+Two honest caveats before anyone generalizes this:
+
+1. **25 dimensions is not "high-dimensional"** by that paper's standard, and its argument is specifically about high-dimensional regimes. This result is consistent with the paper's claim but is not a test of its hardest case.
+2. **n = 10,000 is small.** The hierarchy exists to shorten the greedy walk from a random entry point to the query's neighborhood, and that walk is short when the graph is small. The upper layers here hold 571, 35 and 5 nodes; there is not much routing for them to do.
+
+What the trace shows is consistent with this: the descent through layers 3, 2 and 1 costs only a handful of hops, so removing it saves little and costs little.
+
+### Methodology, and a caveat about the timings
+
+- Recall is the mean of `|approx ∩ exact| / k` over all queries, against ground truth recomputed by `FlatIndex` on the same subsample.
+- QPS is single-threaded wall-clock over all queries, after a warm-up pass. Loam does not batch queries, so QPS is the reciprocal of mean latency.
+- Instrumentation is collected on the same pass that is timed; the counters are integer increments and are noise next to the numpy calls around them.
+
+**Wall-clock on this machine is noisy, and the repo would rather say so than hide it.** Running the `ef` sweep command above three times gave build times of 194.4 s, 31.5 s and 44.6 s, and flat-index throughput of 15519, 13509 and 6349 QPS — a 2.4× spread on an identical workload, consistent with thermal and power management on a laptop. Across all three runs, **recall and mean distance computations were identical to every digit reported**, because the build is deterministic given a seed.
+
+That contrast is the argument for instrumenting distance computations in the first place. `397.2` is a property of the algorithm and reproduces anywhere; `3315.1 QPS` is a property of this laptop on that afternoon. The tables above report one run each, so the numbers within a table are mutually consistent; treat the QPS columns as ±40% and the distance-computation columns as exact.
 
 ---
 
@@ -470,7 +586,7 @@ Each milestone is done only when its acceptance check passes.
 | 4 | Hour 5–7 | `datasets.py` (HDF5 + subsample + ground truth + clustered), `bench.py`, CLI | `loam bench` writes CSV and plot for glove-25 |
 | 5 | Hour 7–8 | `QueryStats` instrumentation + `loam ablate` | Both ablations produce a table |
 | 6 | Hour 8–9 | `loam trace` | Readable per-layer path for one query |
-| 7 | Hour 9–10 | README numbers, demo GIF, CI, LICENSE, CONTRIBUTING | CI green; every README number has its command |
+| 7 | Hour 9–10 | README numbers, CI, LICENSE, CONTRIBUTING | CI green; every README number has its command |
 
 **Scope cut order if behind schedule:** hnswlib reference → `trace` → hierarchy ablation. Never cut: the oracle, the invariant tests, or the honest benchmark table.
 
@@ -506,6 +622,7 @@ After building Loam you should be able to explain:
 - [ ] 2D visualization of layers on synthetic data
 - [ ] Hub analysis: measure in-degree distribution and hub traversal frequency on flat vs hierarchical graphs
 - [ ] Rust port of the hot path, benchmarked against the Python original
+- [ ] A recorded terminal demo of `loam trace` and `loam bench`
 
 ---
 
