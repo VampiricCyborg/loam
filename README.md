@@ -6,6 +6,7 @@
 
 Built line-by-line from the paper · checked against brute force · reports its recall honestly.
 
+[![CI](https://github.com/VampiricCyborg/loam/actions/workflows/ci.yml/badge.svg)](https://github.com/VampiricCyborg/loam/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Core](https://img.shields.io/badge/core-numpy%20only-informational)
