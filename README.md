@@ -548,9 +548,27 @@ What the trace shows is consistent with this: the descent through layers 3, 2 an
 - QPS is single-threaded wall-clock over all queries, after a warm-up pass. Loam does not batch queries, so QPS is the reciprocal of mean latency.
 - Instrumentation is collected on the same pass that is timed; the counters are integer increments and are noise next to the numpy calls around them.
 
-**Wall-clock on this machine is noisy, and the repo would rather say so than hide it.** Running the `ef` sweep command above three times gave build times of 194.4 s, 31.5 s and 44.6 s, and flat-index throughput of 15519, 13509 and 6349 QPS — a 2.4× spread on an identical workload, consistent with thermal and power management on a laptop. Across all three runs, **recall and mean distance computations were identical to every digit reported**, because the build is deterministic given a seed.
+### How the reported numbers were chosen
 
-That contrast is the argument for instrumenting distance computations in the first place. `397.2` is a property of the algorithm and reproduces anywhere; `3315.1 QPS` is a property of this laptop on that afternoon. Each table above reports a single run, so the numbers *within* a table are mutually consistent and their ratios are meaningful. Treat the recall and distance-computation columns as exact and reproducible, and the QPS, latency and build-time columns as indicative only — repeats on this machine moved them by as much as 2.4×.
+**Each table is one run of the single command printed above it. Not a median, not a best-of-N, not an average.** Averaging would produce a table no command reproduces, which is the thing this repo's rule exists to prevent. Specifically, the `ef` sweep command was executed three times and the table reports **the third run** — the one whose `bench/results/glove25-ef-sweep.csv` and `.png` are the committed artifacts. A reader can diff the table against that CSV line by line.
+
+That choice needs disclosing, because wall-clock on this machine is noisy. All three runs, same command, same seed:
+
+| run | build (s) | flat-exact QPS | HNSW QPS @ ef=16 | recall@10 @ ef=16 | mean dist comps @ ef=16 |
+|---|---:|---:|---:|---:|---:|
+| 1 | 194.4 | 15519.3 | 3301.4 | 0.9360 | 397.2 |
+| 2 | 31.5 | 13508.9 | 3417.9 | 0.9360 | 397.2 |
+| 3 (**reported**) | 44.6 | 6348.7 | 3315.1 | 0.9360 | 397.2 |
+
+Read that table before trusting any timing on this page:
+
+- **Build time spans 6.2×** (31.5 s to 194.4 s) and **flat-index throughput spans 2.4×** (6349 to 15519 QPS) on an identical workload. Run 1's build is an outlier that coincided with a freshly downloaded 127 MB dataset file still being touched by the OS; the cause is not proven, so it is reported rather than discarded.
+- **HNSW query throughput was stable to within 4%** across all three runs (3301 / 3418 / 3315 QPS). Only the flat path swung wildly. A plausible explanation is that one large BLAS call is sensitive to CPU boost and thermal state while an interpreter-bound loop is not, but that is a hypothesis, not something measured here.
+- **Recall and mean distance computations were identical to every digit in all three runs**, because the build is deterministic given a seed. They are properties of the algorithm, not of the afternoon.
+
+Note which way the reporting choice cuts. Run 3 has the *lowest* flat-index QPS of the three, so it is the run **least** favorable to the "the exact index is faster" conclusion above: it shows flat winning by 1.9×, where runs 1 and 2 would have shown 4.7× and 4.0×. The headline finding is therefore conservative, not cherry-picked.
+
+**So: treat the recall and distance-computation columns as exact and reproducible. Treat the QPS, latency and build-time columns as order-of-magnitude only.** If you need trustworthy timings, run the command yourself on a quiet machine several times and compare distributions, not single values.
 
 ---
 
