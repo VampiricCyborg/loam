@@ -1,0 +1,5 @@
+# Normalize line endings so CRLF on Windows checkouts never lands in a commit.
+* text=auto eol=lf
+
+*.png binary
+*.hdf5 binary

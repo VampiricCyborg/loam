@@ -489,10 +489,10 @@ Build: **44.6 s** (4.46 ms/insert). Layer sizes `[10000, 571, 35, 5]` — each l
 
 That is not a bug, and it is the most useful thing in this repo. The algorithmic win is real and large — at `ef=16`, HNSW answers with **397 distance computations instead of 10,000**, a 25× reduction, and still gets 93.6% of the true top-10. But Loam loses on wall clock anyway, because the two indexes pay very different prices per distance:
 
-- `FlatIndex` computes all 10,000 distances in **one** numpy call: a single BLAS matmul over one contiguous `(10000, 25)` matrix.
-- `HNSWIndex` computes its 397 distances across **23.5 separate** gather-plus-matmul calls, one per expanded node, each carrying Python interpreter overhead that dwarfs its arithmetic.
+- `FlatIndex` computes all 10,000 distances in **one** numpy call: a single BLAS matmul over one contiguous `(10000, 25)` matrix. At 0.158 ms per query that is **~16 ns per distance**.
+- `HNSWIndex` computes its 397 distances across **23.5 separate** gather-plus-matmul calls, one per expanded node, each carrying Python interpreter overhead that dwarfs its arithmetic. At 0.302 ms per query that is **~760 ns per distance**, roughly 48× more expensive each.
 
-So a 25× reduction in *work* becomes a 20× increase in *time*. The crossover where HNSW wins on the clock needs either a much larger `n` (where the flat matmul stops being cheap) or an implementation where each distance costs the same — which is exactly what hnswlib's C++ buys, and exactly why Loam does not try to compete with it. Loam's job is to show you the 397, and it does.
+So the two effects nearly cancel: 25× fewer distances, each about 48× dearer, leaves HNSW **1.9× slower on the clock** while doing far less work. The crossover needs either a much larger `n` (where the flat matmul stops being cheap) or an implementation where every distance costs the same — which is exactly what hnswlib's C++ buys, and exactly why Loam does not try to compete with it. Loam's job is to show you the 397, and it does.
 
 ### Ablation 1: neighbor selection, Algorithm 3 vs Algorithm 4
 
@@ -550,7 +550,7 @@ What the trace shows is consistent with this: the descent through layers 3, 2 an
 
 **Wall-clock on this machine is noisy, and the repo would rather say so than hide it.** Running the `ef` sweep command above three times gave build times of 194.4 s, 31.5 s and 44.6 s, and flat-index throughput of 15519, 13509 and 6349 QPS — a 2.4× spread on an identical workload, consistent with thermal and power management on a laptop. Across all three runs, **recall and mean distance computations were identical to every digit reported**, because the build is deterministic given a seed.
 
-That contrast is the argument for instrumenting distance computations in the first place. `397.2` is a property of the algorithm and reproduces anywhere; `3315.1 QPS` is a property of this laptop on that afternoon. The tables above report one run each, so the numbers within a table are mutually consistent; treat the QPS columns as ±40% and the distance-computation columns as exact.
+That contrast is the argument for instrumenting distance computations in the first place. `397.2` is a property of the algorithm and reproduces anywhere; `3315.1 QPS` is a property of this laptop on that afternoon. Each table above reports a single run, so the numbers *within* a table are mutually consistent and their ratios are meaningful. Treat the recall and distance-computation columns as exact and reproducible, and the QPS, latency and build-time columns as indicative only — repeats on this machine moved them by as much as 2.4×.
 
 ---
 
